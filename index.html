@@ -101,6 +101,15 @@
   .model-tier.mid { background: rgba(99,102,241,0.15); color: var(--accent); }
   .model-tier.expensive { background: rgba(244,114,182,0.15); color: #f472b6; }
 
+  .eff-row { display: grid; grid-template-columns: 200px 1fr 80px 80px 90px 100px; gap: 8px; align-items: center; padding: 10px 0; border-bottom: 1px solid rgba(46,51,80,0.5); font-size: 12px; }
+  .eff-row:last-child { border-bottom: none; }
+  .eff-row.eff-header { font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+  .eff-bar-track { height: 14px; background: var(--surface2); border-radius: 3px; overflow: hidden; }
+  .eff-bar-fill { height: 100%; border-radius: 3px; }
+  .eff-multiplier { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .eff-savings { font-weight: 700; color: var(--green); font-variant-numeric: tabular-nums; }
+  @media (max-width: 900px) { .eff-row { grid-template-columns: 160px 1fr 60px 60px 70px 80px; font-size: 11px; } }
+
   footer { padding: 16px 32px; border-top: 1px solid var(--border); font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; }
 </style>
 </head>
@@ -140,10 +149,17 @@
       <div id="model-advantage-cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;margin-bottom:24px"></div>
     </div>
 
+    <!-- EFFECTIVE COST / ACCURACY MULTIPLIER -->
+    <div id="effective-cost-section" style="display:none">
+      <div class="section-header">The Real Cost of Inaccuracy</div>
+      <div id="effective-cost-intro" class="insight"></div>
+      <div id="effective-cost-table" class="card"></div>
+    </div>
+
     <div class="section-header">RCRT vs Baselines &mdash; Accuracy by Benchmark</div>
     <div class="grid-2">
       <div class="card"><div class="card-title"><div class="dot" style="background:var(--accent)"></div>Accuracy Comparison</div><div class="chart-wrap"><canvas id="chart-accuracy"></canvas></div></div>
-      <div class="card"><div class="card-title"><div class="dot" style="background:var(--green)"></div>Cost per Correct Answer</div><div class="chart-wrap"><canvas id="chart-cost"></canvas></div></div>
+      <div class="card"><div class="card-title"><div class="dot" style="background:var(--green)"></div>Effective Cost per Usable Answer</div><div class="chart-wrap"><canvas id="chart-cost"></canvas></div></div>
     </div>
 
     <div id="category-section" style="display:none">
@@ -282,6 +298,7 @@ function render() {
 
   renderInsightBanner();
   renderModelAdvantage();
+  renderEffectiveCost();
   renderAccuracyChart();
   renderCostChart();
   renderRunCards();
@@ -388,6 +405,82 @@ function renderModelAdvantage() {
   });
 
   cardsEl.innerHTML = html;
+  section.style.display = 'block';
+}
+
+function renderEffectiveCost() {
+  const section = document.getElementById('effective-cost-section');
+  const introEl = document.getElementById('effective-cost-intro');
+  const tableEl = document.getElementById('effective-cost-table');
+
+  // Collect all surface results across runs
+  const surfaceData = {};
+  allSummaries.forEach(s => {
+    (s.surface_summaries || []).forEach(sf => {
+      if (sf.tasks === 0) return;
+      const key = sf.surface + '|' + (sf.model || '');
+      if (!surfaceData[key]) surfaceData[key] = { surface: sf.surface, model: sf.model, totalTasks: 0, totalCorrect: 0, totalCost: 0, totalLatency: 0 };
+      surfaceData[key].totalTasks += sf.tasks;
+      surfaceData[key].totalCorrect += sf.correct;
+      surfaceData[key].totalCost += sf.total_cost_usd || 0;
+      surfaceData[key].totalLatency += (sf.avg_latency_ms || 0) * sf.tasks;
+    });
+  });
+
+  const rows = Object.values(surfaceData).filter(r => r.totalTasks > 0);
+  if (rows.length === 0) { section.style.display = 'none'; return; }
+
+  rows.forEach(r => {
+    r.accuracy = r.totalCorrect / r.totalTasks;
+    r.retryMultiplier = r.accuracy > 0 ? 1 / r.accuracy : Infinity;
+    r.avgLatency = r.totalLatency / r.totalTasks;
+    r.effectiveLatency = r.avgLatency * r.retryMultiplier;
+    r.effectiveCostPer = r.totalCost > 0 && r.totalCorrect > 0 ? r.totalCost / r.totalCorrect : 0;
+    r.naiveCostPer = r.totalCost > 0 ? r.totalCost / r.totalTasks : 0;
+  });
+
+  rows.sort((a, b) => a.surface === 'rcrt_full' ? -1 : b.surface === 'rcrt_full' ? 1 : b.accuracy - a.accuracy);
+
+  const rcrt = rows.find(r => r.surface === 'rcrt_full');
+  const maxMultiplier = Math.max(...rows.map(r => r.retryMultiplier === Infinity ? 5 : r.retryMultiplier));
+
+  introEl.innerHTML = '<strong>Accuracy directly determines real-world cost.</strong> When a system gives a wrong answer, the user retries, the agent re-runs, or a human has to intervene &mdash; each attempt costs tokens, time, and money. A 50% accurate system effectively costs <strong>2&times;</strong> per usable answer. A 90% accurate system costs only <strong>1.11&times;</strong>. Below we show the <em>effective cost multiplier</em> for each approach: how many attempts (and tokens) you actually burn to get one correct answer.';
+  introEl.style.display = 'block';
+
+  let html = '';
+  html += '<div class="eff-row eff-header"><div>System</div><div>Retry Overhead</div><div style="text-align:right">Accuracy</div><div style="text-align:right">Multiplier</div><div style="text-align:right">Eff. Latency</div><div style="text-align:right">Tokens Saved</div></div>';
+
+  rows.forEach(r => {
+    const label = surfaceLabel(r.surface, r.model);
+    const color = surfaceColor(r.surface);
+    const tier = modelTier(r.model);
+    const mult = r.retryMultiplier === Infinity ? '&infin;' : r.retryMultiplier.toFixed(2) + '&times;';
+    const barPct = r.retryMultiplier === Infinity ? 100 : Math.min((r.retryMultiplier / maxMultiplier) * 100, 100);
+    const barColor = r.retryMultiplier <= 1.15 ? 'var(--green)' : r.retryMultiplier <= 2 ? 'var(--yellow)' : 'var(--red)';
+    const effLat = r.effectiveLatency < 100000 ? (r.effectiveLatency / 1000).toFixed(1) + 's' : '&mdash;';
+
+    let tokensSaved = '&mdash;';
+    if (rcrt && r.surface !== 'rcrt_full' && rcrt.retryMultiplier < r.retryMultiplier && r.retryMultiplier !== Infinity) {
+      const savings = ((1 - rcrt.retryMultiplier / r.retryMultiplier) * 100).toFixed(0);
+      tokensSaved = savings + '% fewer';
+    } else if (r.surface === 'rcrt_full') {
+      tokensSaved = 'baseline';
+    }
+
+    html += '<div class="eff-row">';
+    html += '<div style="color:' + color + ';font-weight:600">' + label + ' <span class="model-tier ' + tier.tier + '">' + tier.label + '</span></div>';
+    html += '<div><div class="eff-bar-track"><div class="eff-bar-fill" style="width:' + barPct + '%;background:' + barColor + '"></div></div></div>';
+    html += '<div style="text-align:right">' + (r.accuracy * 100).toFixed(1) + '%</div>';
+    html += '<div class="eff-multiplier" style="text-align:right;color:' + barColor + '">' + mult + '</div>';
+    html += '<div style="text-align:right;color:var(--muted)">' + effLat + '</div>';
+    html += '<div class="eff-savings" style="text-align:right">' + tokensSaved + '</div>';
+    html += '</div>';
+  });
+
+  // Add explanatory note
+  html += '<div style="margin-top:12px;font-size:11px;color:var(--muted);line-height:1.6"><strong style="color:var(--text)">How to read this:</strong> A 1.11&times; multiplier means for every 100 questions, you need ~111 attempts to get 100 correct answers. A 2.00&times; means you need ~200 attempts. At 0% accuracy (plain model with no context), every attempt fails &mdash; infinite retries, infinite cost. RCRT\'s high accuracy means fewer wasted tokens, less user frustration, and lower total cost of ownership.</div>';
+
+  tableEl.innerHTML = html;
   section.style.display = 'block';
 }
 
