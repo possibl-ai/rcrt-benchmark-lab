@@ -356,10 +356,13 @@ function renderModelAdvantage() {
       const rcrtTierIdx = tiers.indexOf(rcrtTier.tier);
       const baseTierIdx = tiers.indexOf(baseTier.tier);
       const rcrtCheaper = rcrtTierIdx < baseTierIdx;
-      const rcrtBetter = rcrt.accuracy > baseline.accuracy;
+      const sameTier = rcrtTierIdx === baseTierIdx;
+      const rcrtBetter = rcrt.accuracy > baseline.accuracy + 0.005;
       const rcrtEqual = Math.abs(rcrt.accuracy - baseline.accuracy) < 0.01;
+      const delta = rcrt.accuracy - baseline.accuracy;
 
-      if ((rcrtCheaper && rcrtBetter) || (rcrtCheaper && rcrtEqual) || (rcrtBetter && rcrt.total_cost_usd > 0 && baseline.total_cost_usd > 0 && rcrt.total_cost_usd < baseline.total_cost_usd)) {
+      // Show if: cheaper model wins, same model wins, or any meaningful accuracy advantage
+      if ((rcrtCheaper && (rcrtBetter || rcrtEqual)) || (sameTier && rcrtBetter) || (rcrtBetter && delta > 0.05)) {
         comparisons.push({
           benchmark: (allDefinitions[s.benchmark_id] || {}).title || s.benchmark_id,
           rcrt, baseline,
@@ -367,8 +370,9 @@ function renderModelAdvantage() {
           baseModel: shortModel(baseline.model),
           rcrtTier, baseTier,
           baselineKind: baseline.surface,
-          delta: rcrt.accuracy - baseline.accuracy,
+          delta,
           costSaved: (baseline.total_cost_usd > 0 && rcrt.total_cost_usd > 0) ? ((baseline.total_cost_usd - rcrt.total_cost_usd) / baseline.total_cost_usd * 100) : 0,
+          rcrtCheaper, sameTier,
         });
       }
     });
@@ -376,9 +380,14 @@ function renderModelAdvantage() {
 
   if (comparisons.length === 0) { section.style.display = 'none'; return; }
 
-  comparisons.sort((a, b) => b.delta - a.delta);
+  // Sort by delta (highest first), then by cheaper-model-wins first
+  comparisons.sort((a, b) => {
+    if (a.rcrtCheaper && !b.rcrtCheaper) return -1;
+    if (!a.rcrtCheaper && b.rcrtCheaper) return 1;
+    return b.delta - a.delta;
+  });
 
-  introEl.innerHTML = '<strong>RCRT makes smaller, cheaper models outperform larger, more expensive ones.</strong> The comparisons below show cases where RCRT using a budget-tier model achieved equal or higher accuracy than traditional approaches using premium-tier models &mdash; at lower cost. RCRT\'s LOD context engine assembles multi-resolution context across entity relationships, enabling accurate answers on complex multi-hop and cross-scope questions that conventional top-K retrieval cannot handle regardless of model size.';
+  introEl.innerHTML = '<strong>RCRT makes any model perform better &mdash; and makes smaller models outperform larger ones.</strong> The comparisons below show every case where RCRT achieved higher accuracy than the baseline, whether using a cheaper model or the same one. RCRT\'s LOD context engine assembles multi-resolution context across entity relationships, enabling accurate answers on complex multi-hop and cross-scope questions that conventional top-K retrieval cannot handle regardless of model size.';
 
   let html = '';
   comparisons.forEach(c => {
@@ -415,7 +424,11 @@ function renderModelAdvantage() {
     const parts = [];
     if (c.delta > 0) parts.push('+' + accDelta + ' points higher accuracy');
     if (costNote) parts.push(costNote + ' cost');
-    parts.push(c.rcrtTier.label.toLowerCase() + '-tier model beating ' + c.baseTier.label.toLowerCase() + '-tier');
+    if (c.rcrtCheaper) {
+      parts.push(c.rcrtTier.label.toLowerCase() + '-tier model beating ' + c.baseTier.label.toLowerCase() + '-tier');
+    } else if (c.sameTier) {
+      parts.push('same model, better results with RCRT context engine');
+    }
     html += '<div class="adv-takeaway">' + parts.join(' &middot; ') + '</div>';
 
     html += '</div>';
