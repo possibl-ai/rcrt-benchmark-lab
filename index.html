@@ -82,6 +82,25 @@
 
   .winner-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; background: rgba(16,185,129,0.15); color: var(--green); }
 
+  .adv-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; border-left: 4px solid var(--green); }
+  .adv-card-title { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 12px; }
+  .adv-matchup { display: flex; align-items: stretch; gap: 12px; margin-bottom: 12px; }
+  .adv-side { flex: 1; border-radius: 8px; padding: 12px; text-align: center; }
+  .adv-side.winner { background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.3); }
+  .adv-side.loser { background: var(--surface2); border: 1px solid var(--border); }
+  .adv-vs { display: flex; align-items: center; font-size: 12px; font-weight: 700; color: var(--muted); }
+  .adv-model { font-size: 11px; font-weight: 700; color: var(--muted); margin-bottom: 4px; }
+  .adv-model .model-name { color: var(--text); }
+  .adv-pct { font-size: 28px; font-weight: 800; line-height: 1; margin: 6px 0; }
+  .adv-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .adv-cost { font-size: 11px; color: var(--muted); margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .adv-takeaway { font-size: 12px; color: var(--green); font-weight: 600; margin-top: 8px; line-height: 1.5; }
+
+  .model-tier { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+  .model-tier.cheap { background: rgba(16,185,129,0.15); color: var(--green); }
+  .model-tier.mid { background: rgba(99,102,241,0.15); color: var(--accent); }
+  .model-tier.expensive { background: rgba(244,114,182,0.15); color: #f472b6; }
+
   footer { padding: 16px 32px; border-top: 1px solid var(--border); font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; }
 </style>
 </head>
@@ -112,6 +131,13 @@
       <div class="kpi"><div class="kpi-label">RCRT Win Rate</div><div class="kpi-value" style="color:var(--rcrt)" id="kpi-wins">&mdash;</div><div class="kpi-sub" id="kpi-wins-sub"></div></div>
       <div class="kpi"><div class="kpi-label">Benchmark Runs</div><div class="kpi-value" style="color:var(--text)" id="kpi-runs">&mdash;</div><div class="kpi-sub" id="kpi-runs-sub"></div></div>
       <div class="kpi"><div class="kpi-label">Avg Cost Savings</div><div class="kpi-value" style="color:var(--green)" id="kpi-cost">&mdash;</div><div class="kpi-sub" id="kpi-cost-sub"></div></div>
+    </div>
+
+    <!-- MODEL ADVANTAGE SECTION -->
+    <div id="model-advantage-section" style="display:none">
+      <div class="section-header">The Model Advantage &mdash; Smaller, Faster, Cheaper, Better</div>
+      <div id="model-advantage-intro" class="insight"></div>
+      <div id="model-advantage-cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;margin-bottom:24px"></div>
     </div>
 
     <div class="section-header">RCRT vs Baselines &mdash; Accuracy by Benchmark</div>
@@ -255,10 +281,114 @@ function render() {
   document.getElementById('header-meta').textContent = allSummaries.length + ' benchmark runs \u00B7 ' + totalTasks + ' tasks evaluated \u00B7 live from RCRT API';
 
   renderInsightBanner();
+  renderModelAdvantage();
   renderAccuracyChart();
   renderCostChart();
   renderRunCards();
   renderCategoryBreakdown();
+}
+
+const MODEL_TIERS = {
+  'claude-haiku-4.5': { tier: 'cheap', label: 'Budget', priceNote: '~$1/M input' },
+  'claude-haiku-3.5': { tier: 'cheap', label: 'Budget', priceNote: '~$0.80/M input' },
+  'claude-sonnet-4.6': { tier: 'mid', label: 'Standard', priceNote: '~$3/M input' },
+  'claude-sonnet-3.5': { tier: 'mid', label: 'Standard', priceNote: '~$3/M input' },
+  'claude-opus-4.6': { tier: 'expensive', label: 'Premium', priceNote: '~$15/M input' },
+  'claude-opus-3': { tier: 'expensive', label: 'Premium', priceNote: '~$15/M input' },
+  'gpt-4o': { tier: 'mid', label: 'Standard', priceNote: '~$5/M input' },
+  'gpt-4o-mini': { tier: 'cheap', label: 'Budget', priceNote: '~$0.15/M input' },
+};
+function modelTier(model) {
+  const short = (model || '').replace('anthropic/', '').replace('openai/', '');
+  return MODEL_TIERS[short] || { tier: 'mid', label: 'Unknown', priceNote: '' };
+}
+function shortModel(model) { return (model || '').replace('anthropic/', '').replace('openai/', ''); }
+
+function renderModelAdvantage() {
+  const section = document.getElementById('model-advantage-section');
+  const cardsEl = document.getElementById('model-advantage-cards');
+  const introEl = document.getElementById('model-advantage-intro');
+  const comparisons = [];
+
+  allSummaries.forEach(s => {
+    const surfs = s.surface_summaries || [];
+    const rcrt = surfs.find(x => x.surface === 'rcrt_full');
+    if (!rcrt) return;
+    const rcrtTier = modelTier(rcrt.model);
+
+    surfs.filter(x => x.surface !== 'rcrt_full' && x.tasks > 0).forEach(baseline => {
+      const baseTier = modelTier(baseline.model);
+      const tiers = ['cheap', 'mid', 'expensive'];
+      const rcrtTierIdx = tiers.indexOf(rcrtTier.tier);
+      const baseTierIdx = tiers.indexOf(baseTier.tier);
+      const rcrtCheaper = rcrtTierIdx < baseTierIdx;
+      const rcrtBetter = rcrt.accuracy > baseline.accuracy;
+      const rcrtEqual = Math.abs(rcrt.accuracy - baseline.accuracy) < 0.01;
+
+      if ((rcrtCheaper && rcrtBetter) || (rcrtCheaper && rcrtEqual) || (rcrtBetter && rcrt.total_cost_usd > 0 && baseline.total_cost_usd > 0 && rcrt.total_cost_usd < baseline.total_cost_usd)) {
+        comparisons.push({
+          benchmark: (allDefinitions[s.benchmark_id] || {}).title || s.benchmark_id,
+          rcrt, baseline,
+          rcrtModel: shortModel(rcrt.model),
+          baseModel: shortModel(baseline.model),
+          rcrtTier, baseTier,
+          baselineKind: baseline.surface,
+          delta: rcrt.accuracy - baseline.accuracy,
+          costSaved: (baseline.total_cost_usd > 0 && rcrt.total_cost_usd > 0) ? ((baseline.total_cost_usd - rcrt.total_cost_usd) / baseline.total_cost_usd * 100) : 0,
+        });
+      }
+    });
+  });
+
+  if (comparisons.length === 0) { section.style.display = 'none'; return; }
+
+  comparisons.sort((a, b) => b.delta - a.delta);
+
+  introEl.innerHTML = '<strong>RCRT makes smaller, cheaper models outperform larger, more expensive ones.</strong> The comparisons below show cases where RCRT using a budget-tier model achieved equal or higher accuracy than traditional approaches using premium-tier models &mdash; at lower cost. This is possible because RCRT\'s LOD context engine, structured memory, and multi-hop cascade extract more value from every token, reducing the dependence on raw model capability.';
+
+  let html = '';
+  comparisons.forEach(c => {
+    const accDelta = (c.delta * 100).toFixed(1);
+    const costNote = c.costSaved > 0 ? c.costSaved.toFixed(0) + '% less' : '';
+    const baseLabel = surfaceLabel(c.baselineKind, c.baseline.model);
+
+    html += '<div class="adv-card">';
+    html += '<div class="adv-card-title">' + c.benchmark + '</div>';
+    html += '<div class="adv-matchup">';
+
+    // RCRT side (winner)
+    html += '<div class="adv-side winner">';
+    html += '<div class="adv-label">RCRT Platform</div>';
+    html += '<div class="adv-model"><span class="model-name">' + c.rcrtModel + '</span> <span class="model-tier ' + c.rcrtTier.tier + '">' + c.rcrtTier.label + '</span></div>';
+    html += '<div class="adv-pct" style="color:var(--green)">' + (c.rcrt.accuracy * 100).toFixed(1) + '%</div>';
+    if (c.rcrt.total_cost_usd > 0) html += '<div class="adv-cost">' + usd(c.rcrt.total_cost_usd) + ' total</div>';
+    html += '</div>';
+
+    // VS
+    html += '<div class="adv-vs">vs</div>';
+
+    // Baseline side (loser)
+    html += '<div class="adv-side loser">';
+    html += '<div class="adv-label">' + (c.baselineKind === 'traditional_rag' ? 'Vertex AI Search' : c.baselineKind === 'plain_model' ? 'Direct' : 'Baseline') + '</div>';
+    html += '<div class="adv-model"><span class="model-name">' + c.baseModel + '</span> <span class="model-tier ' + c.baseTier.tier + '">' + c.baseTier.label + '</span></div>';
+    html += '<div class="adv-pct" style="color:var(--muted)">' + (c.baseline.accuracy * 100).toFixed(1) + '%</div>';
+    if (c.baseline.total_cost_usd > 0) html += '<div class="adv-cost">' + usd(c.baseline.total_cost_usd) + ' total</div>';
+    html += '</div>';
+
+    html += '</div>'; // matchup
+
+    // Takeaway
+    const parts = [];
+    if (c.delta > 0) parts.push('+' + accDelta + ' points higher accuracy');
+    if (costNote) parts.push(costNote + ' cost');
+    parts.push(c.rcrtTier.label.toLowerCase() + '-tier model beating ' + c.baseTier.label.toLowerCase() + '-tier');
+    html += '<div class="adv-takeaway">' + parts.join(' &middot; ') + '</div>';
+
+    html += '</div>';
+  });
+
+  cardsEl.innerHTML = html;
+  section.style.display = 'block';
 }
 
 function renderInsightBanner() {
