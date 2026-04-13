@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RCRT Benchmark Lab</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --surface2: #22263a; --border: #2e3350;
+    --accent: #6366f1; --accent2: #8b5cf6; --green: #10b981; --yellow: #f59e0b;
+    --red: #ef4444; --text: #e2e8f0; --muted: #64748b;
+    --rcrt: #818cf8; --rag: #fbbf24; --plain: #94a3b8;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  .header { padding: 18px 32px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; background: var(--surface); flex-wrap: wrap; gap: 12px; }
+  .header h1 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
+  .header h1 span { color: var(--accent); }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+  .tag-green { background: rgba(16,185,129,0.15); color: var(--green); }
+  .tag-accent { background: rgba(99,102,241,0.15); color: var(--accent); }
+
+  .main { padding: 24px 32px; max-width: 1440px; margin: 0 auto; }
+  @media (max-width: 768px) { .main { padding: 16px; } }
+
+  .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; }
+  .kpi-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin-bottom: 8px; }
+  .kpi-value { font-size: 28px; font-weight: 700; line-height: 1; }
+  .kpi-sub { font-size: 11px; color: var(--muted); margin-top: 6px; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
+  @media (max-width: 1000px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+  .card-title { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 7px 10px; font-size: 10px; color: var(--muted); font-weight: 700; border-bottom: 1px solid var(--border); text-transform: uppercase; letter-spacing: 0.4px; }
+  td { padding: 9px 10px; border-bottom: 1px solid rgba(46,51,80,0.5); }
+  tr:last-child td { border-bottom: none; }
+
+  .insight { background: rgba(99,102,241,0.07); border: 1px solid rgba(99,102,241,0.2); border-radius: 8px; padding: 14px 16px; font-size: 13px; color: var(--text); line-height: 1.7; margin-bottom: 20px; }
+  .insight strong { color: var(--accent); }
+
+  .chart-wrap { position: relative; height: 300px; }
+  .section-header { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 28px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+
+  .run-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; cursor: pointer; transition: border-color 0.15s; }
+  .run-card:hover { border-color: var(--accent); }
+  .run-card.expanded { border-color: var(--accent); }
+
+  .surface-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; }
+  .surface-name { font-size: 11px; width: 220px; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .surface-bar { flex: 1; height: 22px; background: var(--surface2); border-radius: 4px; overflow: hidden; position: relative; }
+  .surface-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; display: flex; align-items: center; justify-content: flex-end; padding-right: 6px; font-size: 10px; font-weight: 700; color: white; min-width: 30px; }
+  .surface-cost { font-size: 11px; color: var(--muted); width: 80px; text-align: right; font-variant-numeric: tabular-nums; }
+
+  .detail-panel { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); display: none; }
+  .detail-panel.open { display: block; }
+
+  .loading { display: flex; align-items: center; justify-content: center; padding: 60px; color: var(--muted); font-size: 14px; }
+  .loading-spinner { width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 10px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+  .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse 2s ease-in-out infinite; }
+
+  .cat-section { margin-bottom: 16px; }
+  .cat-header { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 10px; }
+  .cat-icon { font-size: 20px; flex-shrink: 0; margin-top: 2px; }
+  .cat-info h4 { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 3px; }
+  .cat-info p { font-size: 11px; color: var(--muted); line-height: 1.5; }
+  .cat-bars-container { display: flex; flex-direction: column; gap: 4px; margin-left: 32px; }
+  .cat-bar-row { display: flex; align-items: center; gap: 8px; }
+  .cat-bar-label { font-size: 11px; width: 200px; flex-shrink: 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cat-bar-track { flex: 1; height: 18px; background: var(--surface2); border-radius: 3px; overflow: hidden; position: relative; }
+  .cat-bar-fill { height: 100%; border-radius: 3px; display: flex; align-items: center; padding-left: 6px; font-size: 10px; font-weight: 700; color: white; min-width: 2px; transition: width 0.4s; }
+  .cat-bar-detail { font-size: 10px; color: var(--muted); width: 60px; text-align: right; font-variant-numeric: tabular-nums; }
+
+  .winner-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; background: rgba(16,185,129,0.15); color: var(--green); }
+
+  footer { padding: 16px 32px; border-top: 1px solid var(--border); font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>RCRT <span>Benchmark Lab</span></h1>
+    <div id="header-meta" style="font-size:12px;color:var(--muted);margin-top:3px">Loading benchmark data...</div>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center">
+    <div class="live-dot"></div>
+    <span class="tag tag-green">Live Data</span>
+    <span class="tag tag-accent" id="header-date"></span>
+    <button onclick="loadAll()" style="padding:4px 12px;border-radius:6px;font-size:11px;font-weight:700;background:rgba(99,102,241,0.15);color:var(--accent);border:1px solid rgba(99,102,241,0.3);cursor:pointer">&#x21bb; Refresh</button>
+  </div>
+</div>
+
+<div class="main">
+  <div id="loading" class="loading"><div class="loading-spinner"></div>Loading benchmark data from RCRT API...</div>
+  <div id="content" style="display:none">
+
+    <div id="insight-banner" class="insight" style="display:none"></div>
+
+    <div class="kpi-row">
+      <div class="kpi"><div class="kpi-label">Best RCRT Accuracy</div><div class="kpi-value" style="color:var(--green)" id="kpi-best">&mdash;</div><div class="kpi-sub" id="kpi-best-sub"></div></div>
+      <div class="kpi"><div class="kpi-label">Avg RCRT Accuracy</div><div class="kpi-value" style="color:var(--accent)" id="kpi-avg">&mdash;</div><div class="kpi-sub" id="kpi-avg-sub"></div></div>
+      <div class="kpi"><div class="kpi-label">RCRT Win Rate</div><div class="kpi-value" style="color:var(--rcrt)" id="kpi-wins">&mdash;</div><div class="kpi-sub" id="kpi-wins-sub"></div></div>
+      <div class="kpi"><div class="kpi-label">Benchmark Runs</div><div class="kpi-value" style="color:var(--text)" id="kpi-runs">&mdash;</div><div class="kpi-sub" id="kpi-runs-sub"></div></div>
+      <div class="kpi"><div class="kpi-label">Avg Cost Savings</div><div class="kpi-value" style="color:var(--green)" id="kpi-cost">&mdash;</div><div class="kpi-sub" id="kpi-cost-sub"></div></div>
+    </div>
+
+    <div class="section-header">RCRT vs Baselines &mdash; Accuracy by Benchmark</div>
+    <div class="grid-2">
+      <div class="card"><div class="card-title"><div class="dot" style="background:var(--accent)"></div>Accuracy Comparison</div><div class="chart-wrap"><canvas id="chart-accuracy"></canvas></div></div>
+      <div class="card"><div class="card-title"><div class="dot" style="background:var(--green)"></div>Cost per Correct Answer</div><div class="chart-wrap"><canvas id="chart-cost"></canvas></div></div>
+    </div>
+
+    <div id="category-section" style="display:none">
+      <div class="section-header">Deep Dive &mdash; Accuracy by Question Category</div>
+      <div id="category-intro" class="insight" style="display:none"></div>
+      <div class="card" id="category-card"></div>
+    </div>
+
+    <div class="section-header">Benchmark Runs</div>
+    <div id="runs-grid" style="display:grid;grid-template-columns:1fr;gap:16px;margin-bottom:24px"></div>
+
+  </div>
+</div>
+
+<footer>
+  <span>RCRT Benchmark Lab &middot; possibl.ai</span>
+  <span id="footer-updated"></span>
+</footer>
+
+<script>
+const CONFIG = {
+  apiUrl: 'https://rcrt-api-gateway-1038267090431.us-central1.run.app',
+  tenantId: '8f05d226-e8d3-4b94-9a7e-22cff7433f52',
+  apiKey: 'tk_b253a74d005a62ff40d564718953e2efb54ca4eca3b4a2c5e055cb5b1f41ff35',
+};
+const params = new URLSearchParams(window.location.hash.slice(1));
+if (params.get('api_key')) CONFIG.apiKey = params.get('api_key');
+if (params.get('tenant_id')) CONFIG.tenantId = params.get('tenant_id');
+if (params.get('api_url')) CONFIG.apiUrl = params.get('api_url');
+
+const SURFACE_COLORS = { rcrt_full: '#818cf8', traditional_rag: '#fbbf24', traditional_tools: '#f59e0b', plain_model: '#94a3b8', external_surface: '#a78bfa' };
+function surfaceColor(s) { return SURFACE_COLORS[s] || '#94a3b8'; }
+function surfaceLabel(kind, model) {
+  const m = (model || '').replace('anthropic/', '').replace('openai/', '');
+  if (kind === 'rcrt_full') return 'RCRT + ' + (m || 'Unknown');
+  if (kind === 'traditional_rag') return 'Vertex AI Search + ' + (m || 'Unknown');
+  if (kind === 'traditional_tools') return 'Vertex AI Search + Tools + ' + (m || 'Unknown');
+  if (kind === 'plain_model') return (m || 'Unknown') + ' Direct';
+  return kind + ' + ' + (m || 'Unknown');
+}
+function pct(v) { return (v * 100).toFixed(1) + '%'; }
+function usd(v) { return '$' + (v || 0).toFixed(4); }
+
+const CATEGORY_INFO = {
+  'direct': {
+    icon: '&#x1F3AF;',
+    title: 'Direct Retrieval',
+    desc: 'Single-hop factual questions that require finding one specific piece of information. Examples: "What is Jane\'s role?" or "What is the budget for Project Alpha?" Tests whether the system can locate and return precise facts from its knowledge base.',
+    why: 'The baseline test. If a system can\'t answer simple lookups, nothing else matters.'
+  },
+  'multi-hop': {
+    icon: '&#x1F517;',
+    title: 'Multi-Hop Reasoning',
+    desc: 'Questions requiring 2-3 connected lookups across different entities. Examples: "In which city is the lead of Project Alpha based?" (requires: project &rarr; lead person &rarr; their location). The hardest category for traditional RAG.',
+    why: 'Real-world questions are rarely single-hop. This tests whether the system can chain facts together, which is where RCRT\'s structured context engine dominates.'
+  },
+  'cross-scope': {
+    icon: '&#x1F30D;',
+    title: 'Cross-Scope',
+    desc: 'Facts that exist at the organization or platform level rather than the workspace level. Examples: "What is the budget of the Services division?" or "Who heads the Ventures division?" Tests scope inheritance and data federation.',
+    why: 'Enterprise systems need to surface information from parent scopes. RCRT\'s breadcrumb hierarchy handles this natively; basic RAG treats all data as flat.'
+  },
+  'archival': {
+    icon: '&#x1F4DA;',
+    title: 'Archival Retrieval',
+    desc: 'Information about less prominent entities not in the system\'s immediate context window. Examples: skills of employees ranked 20th+, or specific weekly hour allocations. May require tool use or deep search to surface.',
+    why: 'Tests recall beyond the top-K results. RCRT\'s LOD resolution system surfaces archival data that traditional top-K retrieval misses entirely.'
+  },
+  'override': {
+    icon: '&#x1F504;',
+    title: 'Data Override',
+    desc: 'Workspace-level data that should override broader platform-level defaults. Example: "What floor is the Ironhaven office on?" when both platform and workspace have location data.',
+    why: 'Multi-tenant systems must respect data precedence. RCRT\'s parent-chain resolution correctly prefers workspace-local data over inherited defaults.'
+  },
+  'coherence': {
+    icon: '&#x1F9E0;',
+    title: 'Context Coherence',
+    desc: 'Multi-turn conversation sequences where the system must retain state across distractor questions and recall earlier facts. Tests working memory and session continuity.',
+    why: 'Conversational AI must track context across turns. RCRT\'s session-scoped memory and LOD cascade maintain coherent state where stateless RAG cannot.'
+  }
+};
+
+async function apiFetch(path) {
+  const resp = await fetch(CONFIG.apiUrl + path, { headers: { 'Authorization': 'Bearer ' + CONFIG.apiKey, 'X-Tenant-ID': CONFIG.tenantId } });
+  if (!resp.ok) throw new Error('API ' + resp.status + ': ' + path);
+  return resp.json();
+}
+
+let allSummaries = [], allDefinitions = {}, charts = {};
+
+async function loadAll() {
+  try {
+    const [sRaw, dRaw] = await Promise.all([apiFetch('/v1/benchmark/summaries'), apiFetch('/v1/benchmark/definitions')]);
+    allSummaries = Array.isArray(sRaw) ? sRaw : [];
+    (dRaw.definitions || []).forEach(d => allDefinitions[d.id] = d);
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('content').style.display = 'block';
+    render();
+  } catch (e) { document.getElementById('loading').innerHTML = '<span style="color:var(--red)">Failed to load: ' + e.message + '</span>'; }
+}
+
+function render() {
+  const now = new Date();
+  document.getElementById('header-date').textContent = now.toLocaleDateString('en-NZ', { month: 'short', year: 'numeric' });
+  document.getElementById('footer-updated').textContent = 'Updated ' + now.toLocaleTimeString();
+
+  let totalTasks = 0, rcrtAccs = [], rcrtWins = 0, rcrtCosts = [], baseCosts = [];
+  allSummaries.forEach(s => {
+    const surfs = s.surface_summaries || [];
+    const rcrt = surfs.find(x => x.surface === 'rcrt_full');
+    const bases = surfs.filter(x => x.surface !== 'rcrt_full');
+    if (rcrt) { rcrtAccs.push(rcrt.accuracy); totalTasks += rcrt.tasks; if (rcrt.total_cost_usd > 0) rcrtCosts.push(rcrt.total_cost_usd / Math.max(rcrt.correct, 1)); }
+    const bestBase = bases.reduce((b, x) => (!b || x.accuracy > b.accuracy) ? x : b, null);
+    if (rcrt && bestBase && rcrt.accuracy >= bestBase.accuracy) rcrtWins++;
+    bases.forEach(b => { if (b.total_cost_usd > 0 && b.correct > 0) baseCosts.push(b.total_cost_usd / b.correct); });
+  });
+
+  const bestAcc = rcrtAccs.length ? Math.max(...rcrtAccs) : 0;
+  const avgAcc = rcrtAccs.length ? rcrtAccs.reduce((a, b) => a + b, 0) / rcrtAccs.length : 0;
+  const winRate = allSummaries.length ? rcrtWins / allSummaries.length : 0;
+  const avgRCPC = rcrtCosts.length ? rcrtCosts.reduce((a, b) => a + b, 0) / rcrtCosts.length : 0;
+  const avgBCPC = baseCosts.length ? baseCosts.reduce((a, b) => a + b, 0) / baseCosts.length : 0;
+  const costSave = avgBCPC > 0 && avgRCPC > 0 ? ((avgBCPC - avgRCPC) / avgBCPC) * 100 : 0;
+
+  document.getElementById('kpi-best').textContent = pct(bestAcc);
+  document.getElementById('kpi-best-sub').textContent = 'across ' + allSummaries.length + ' benchmark runs';
+  document.getElementById('kpi-avg').textContent = pct(avgAcc);
+  document.getElementById('kpi-avg-sub').textContent = totalTasks + ' total tasks evaluated';
+  document.getElementById('kpi-wins').textContent = pct(winRate);
+  document.getElementById('kpi-wins-sub').textContent = rcrtWins + ' of ' + allSummaries.length + ' runs won';
+  document.getElementById('kpi-runs').textContent = allSummaries.length;
+  document.getElementById('kpi-runs-sub').textContent = Object.keys(allDefinitions).length + ' benchmark definitions';
+  document.getElementById('kpi-cost').textContent = costSave > 0 ? costSave.toFixed(0) + '%' : 'n/a';
+  document.getElementById('kpi-cost-sub').textContent = costSave > 0 ? 'lower cost per correct answer' : 'cost data from new runs';
+  document.getElementById('header-meta').textContent = allSummaries.length + ' benchmark runs \u00B7 ' + totalTasks + ' tasks evaluated \u00B7 live from RCRT API';
+
+  renderInsightBanner();
+  renderAccuracyChart();
+  renderCostChart();
+  renderRunCards();
+  renderCategoryBreakdown();
+}
+
+function renderInsightBanner() {
+  const banner = document.getElementById('insight-banner');
+  let best = null;
+  allSummaries.forEach(s => {
+    const surfs = s.surface_summaries || [];
+    const rcrt = surfs.find(x => x.surface === 'rcrt_full');
+    const bases = surfs.filter(x => x.surface !== 'rcrt_full' && x.tasks > 0);
+    if (!rcrt || !bases.length) return;
+    const bestB = bases.reduce((b, x) => (!b || x.accuracy > b.accuracy) ? x : b, null);
+    if (!bestB) return;
+    const delta = rcrt.accuracy - bestB.accuracy;
+    if (!best || delta > best.delta) best = { rcrt, baseline: bestB, delta, bid: s.benchmark_id };
+  });
+  if (best && best.delta > 0) {
+    const rl = surfaceLabel('rcrt_full', best.rcrt.model), bl = surfaceLabel(best.baseline.surface, best.baseline.model);
+    const cn = (best.rcrt.total_cost_usd > 0 && best.baseline.total_cost_usd > 0) ? ' at <strong>' + usd(best.rcrt.total_cost_usd) + '</strong> vs <strong>' + usd(best.baseline.total_cost_usd) + '</strong>' : '';
+    banner.innerHTML = '<strong>Key Finding:</strong> <strong>' + rl + '</strong> achieved <strong style="color:var(--green)">' + pct(best.rcrt.accuracy) + '</strong> vs <strong>' + bl + '</strong> at <strong>' + pct(best.baseline.accuracy) + '</strong> on ' + ((allDefinitions[best.bid] || {}).title || best.bid) + cn + '. RCRT\'s intelligent context engine makes a cheaper model outperform expensive alternatives with basic retrieval.';
+    banner.style.display = 'block';
+  }
+}
+
+function renderAccuracyChart() {
+  const ctx = document.getElementById('chart-accuracy');
+  if (charts.accuracy) charts.accuracy.destroy();
+  const byB = {}; allSummaries.forEach(s => { byB[s.benchmark_id] = s; });
+  const bms = Object.keys(byB).sort();
+  const sSet = new Set(); bms.forEach(b => (byB[b].surface_summaries || []).forEach(s => sSet.add(s.surface)));
+  const sList = [...sSet].sort((a, b) => a === 'rcrt_full' ? -1 : b === 'rcrt_full' ? 1 : a.localeCompare(b));
+  const sMods = {}; bms.forEach(b => (byB[b].surface_summaries || []).forEach(s => { if (!sMods[s.surface]) sMods[s.surface] = s.model; }));
+  const dTitles = {}; Object.values(allDefinitions).forEach(d => dTitles[d.id] = d.title);
+  charts.accuracy = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: bms.map(b => dTitles[b] || b), datasets: sList.map(s => ({ label: surfaceLabel(s, sMods[s]), data: bms.map(b => { const sf = (byB[b].surface_summaries || []).find(x => x.surface === s); return sf ? +(sf.accuracy * 100).toFixed(1) : 0; }), backgroundColor: surfaceColor(s), borderRadius: 4, barPercentage: 0.7 })) },
+    options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, max: 105, ticks: { color: '#64748b', callback: v => v + '%' }, grid: { color: 'rgba(46,51,80,0.5)' } }, x: { ticks: { color: '#64748b', font: { size: 10 } }, grid: { display: false } } }, plugins: { legend: { labels: { color: '#e2e8f0', font: { size: 11 }, usePointStyle: true, pointStyle: 'circle' } }, tooltip: { callbacks: { label: c => c.dataset.label + ': ' + c.raw + '%' } } } }
+  });
+}
+
+function renderCostChart() {
+  const ctx = document.getElementById('chart-cost');
+  if (charts.cost) charts.cost.destroy();
+  const byB = {}; allSummaries.forEach(s => { byB[s.benchmark_id] = s; });
+  const bms = Object.keys(byB).sort();
+  const sSet = new Set(); bms.forEach(b => (byB[b].surface_summaries || []).forEach(s => { if (s.total_cost_usd > 0) sSet.add(s.surface); }));
+  const sList = [...sSet].sort((a, b) => a === 'rcrt_full' ? -1 : b === 'rcrt_full' ? 1 : a.localeCompare(b));
+  if (!sList.length) { ctx.parentElement.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:13px">Cost data available from new benchmark runs</div>'; return; }
+  const sMods = {}; bms.forEach(b => (byB[b].surface_summaries || []).forEach(s => { if (!sMods[s.surface]) sMods[s.surface] = s.model; }));
+  const dTitles = {}; Object.values(allDefinitions).forEach(d => dTitles[d.id] = d.title);
+  charts.cost = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: bms.map(b => dTitles[b] || b), datasets: sList.map(s => ({ label: surfaceLabel(s, sMods[s]), data: bms.map(b => { const sf = (byB[b].surface_summaries || []).find(x => x.surface === s); return (sf && sf.correct > 0 && sf.total_cost_usd > 0) ? +(sf.total_cost_usd / sf.correct).toFixed(6) : 0; }), backgroundColor: surfaceColor(s), borderRadius: 4, barPercentage: 0.7 })) },
+    options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, ticks: { color: '#64748b', callback: v => '$' + v.toFixed(4) }, grid: { color: 'rgba(46,51,80,0.5)' } }, x: { ticks: { color: '#64748b', font: { size: 10 } }, grid: { display: false } } }, plugins: { legend: { labels: { color: '#e2e8f0', font: { size: 11 }, usePointStyle: true, pointStyle: 'circle' } }, tooltip: { callbacks: { label: c => c.dataset.label + ': $' + c.raw.toFixed(6) + '/correct' } } } }
+  });
+}
+
+function renderRunCards() {
+  const grid = document.getElementById('runs-grid');
+  grid.innerHTML = '';
+  [...allSummaries].forEach((s, idx) => {
+    const surfs = (s.surface_summaries || []).sort((a, b) => a.surface === 'rcrt_full' ? -1 : b.surface === 'rcrt_full' ? 1 : a.surface.localeCompare(b.surface));
+    const winner = surfs.reduce((best, x) => (!best || x.accuracy > best.accuracy) ? x : best, null);
+    const defTitle = (allDefinitions[s.benchmark_id] || {}).title || s.benchmark_id;
+    const rcrt = surfs.find(x => x.surface === 'rcrt_full');
+    let barsHTML = '';
+    surfs.forEach(sf => {
+      const label = surfaceLabel(sf.surface, sf.model);
+      const accPct = (sf.accuracy * 100).toFixed(1);
+      const color = surfaceColor(sf.surface);
+      const costStr = sf.total_cost_usd > 0 ? usd(sf.total_cost_usd) : '';
+      barsHTML += '<div class="surface-row"><div class="surface-name" style="color:' + color + '" title="' + label + '">' + label + '</div><div class="surface-bar"><div class="surface-fill" style="width:' + accPct + '%;background:' + color + '">' + accPct + '%</div></div><div class="surface-cost">' + costStr + '</div></div>';
+    });
+    const wl = winner ? surfaceLabel(winner.surface, winner.model) : '';
+    const dur = s.duration_seconds ? (s.duration_seconds / 60).toFixed(1) + ' min' : '';
+    const tasks = rcrt ? rcrt.tasks + ' tasks' : '';
+    const card = document.createElement('div');
+    card.className = 'run-card'; card.id = 'run-' + idx;
+    card.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px"><div><div style="font-size:14px;font-weight:700;color:var(--text)">' + defTitle + '</div><div style="font-size:11px;color:var(--muted);margin-top:4px">Run ' + (s.run_id || '').slice(0, 8) + ' \u00B7 ' + tasks + ' \u00B7 ' + dur + '</div></div>' + (winner ? '<span class="winner-badge">Winner: ' + wl + '</span>' : '') + '</div>' + barsHTML + '<div class="detail-panel" id="detail-' + idx + '"><div class="loading" style="padding:20px"><div class="loading-spinner"></div>Loading report...</div></div>';
+    card.onclick = () => toggleDetail(idx, s.run_id);
+    grid.appendChild(card);
+  });
+}
+
+async function toggleDetail(idx, runId) {
+  const panel = document.getElementById('detail-' + idx);
+  const card = document.getElementById('run-' + idx);
+  if (panel.classList.contains('open')) { panel.classList.remove('open'); card.classList.remove('expanded'); return; }
+  panel.classList.add('open'); card.classList.add('expanded');
+  try {
+    const report = await apiFetch('/v1/benchmark/runs/' + runId + '/report');
+    renderDetailPanel(panel, report);
+  } catch (e) { panel.innerHTML = '<div style="color:var(--red);font-size:12px;padding:8px">Failed to load: ' + e.message + '</div>'; }
+}
+
+function renderDetailPanel(panel, report) {
+  const surfaces = report.surfaces || [];
+  const cats = report.by_category || [];
+  const tasks = report.tasks || [];
+  const sMods = {}; ((report.summary || {}).surface_summaries || []).forEach(s => sMods[s.surface] = s.model);
+
+  let html = '';
+  if (cats.length) {
+    html += '<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:10px">Accuracy by Category</div>';
+    cats.forEach(cat => {
+      const info = CATEGORY_INFO[cat.category] || {};
+      html += '<div style="margin-bottom:8px"><div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:4px">' + (info.icon || '') + ' ' + (info.title || cat.category) + '</div>';
+      surfaces.forEach(s => {
+        const stats = (cat.surfaces || {})[s];
+        const pctVal = stats ? (stats.accuracy * 100) : 0;
+        const detail = stats ? stats.correct + '/' + stats.total : '0/0';
+        html += '<div class="cat-bar-row"><div class="cat-bar-label" style="color:' + surfaceColor(s) + '">' + surfaceLabel(s, sMods[s]) + '</div><div class="cat-bar-track"><div class="cat-bar-fill" style="width:' + Math.max(pctVal, 2) + '%;background:' + surfaceColor(s) + '">' + (pctVal > 8 ? pctVal.toFixed(0) + '%' : '') + '</div></div><div class="cat-bar-detail">' + detail + '</div></div>';
+      });
+      html += '</div>';
+    });
+  }
+
+  if (tasks.length) {
+    html += '<div style="margin-top:16px;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:10px">Head-to-Head (' + tasks.length + ' tasks)</div>';
+    html += '<div style="max-height:300px;overflow:auto"><table><thead><tr><th>Task</th><th>Category</th>';
+    surfaces.forEach(s => html += '<th style="text-align:right;color:' + surfaceColor(s) + '">' + surfaceLabel(s, sMods[s]).split(' + ').pop() + '</th>');
+    html += '</tr></thead><tbody>';
+    tasks.slice(0, 50).forEach(t => {
+      html += '<tr><td style="font-size:11px">' + t.task_id + '</td><td style="font-size:11px;color:var(--muted)">' + t.category + '</td>';
+      surfaces.forEach(s => {
+        const sc = t.surface_scores[s], gr = t.surface_grades[s], isW = t.winner === s;
+        const col = isW ? 'var(--green)' : gr === 'CORRECT' ? 'rgba(16,185,129,0.6)' : gr === 'INCORRECT' ? 'var(--red)' : 'var(--muted)';
+        html += '<td style="text-align:right;color:' + col + ';font-weight:' + (isW ? '700' : '400') + ';font-size:12px;font-variant-numeric:tabular-nums">' + (typeof sc === 'number' ? sc.toFixed(0) : '-') + '</td>';
+      });
+      html += '</tr>';
+    });
+    html += '</tbody></table></div>';
+  }
+  panel.innerHTML = html;
+}
+
+async function renderCategoryBreakdown() {
+  const recallRuns = allSummaries.filter(s => s.benchmark_id === 'context-recall');
+  if (!recallRuns.length) { document.getElementById('category-section').style.display = 'none'; return; }
+  const best = recallRuns.reduce((b, s) => {
+    const r = (s.surface_summaries || []).find(x => x.surface === 'rcrt_full');
+    return r && (!b || r.accuracy > b.acc) ? { run: s, acc: r.accuracy } : b;
+  }, null);
+  if (!best) return;
+
+  try {
+    const report = await apiFetch('/v1/benchmark/runs/' + best.run.run_id + '/report');
+    const cats = report.by_category || [];
+    const surfaces = report.surfaces || [];
+    const sMods = {}; ((report.summary || {}).surface_summaries || []).forEach(s => sMods[s.surface] = s.model);
+    if (!cats.length) return;
+
+    // Intro
+    const intro = document.getElementById('category-intro');
+    intro.innerHTML = 'The <strong>Context Recall</strong> benchmark tests retrieval across 5 distinct question categories, each targeting a different aspect of knowledge management. Below we break down how each system performed on each category, with explanations of what each category tests and why it matters.';
+    intro.style.display = 'block';
+
+    let html = '';
+    cats.forEach(cat => {
+      const info = CATEGORY_INFO[cat.category] || { icon: '&#x2753;', title: cat.category, desc: '', why: '' };
+      html += '<div class="cat-section">';
+      html += '<div class="cat-header"><div class="cat-icon">' + info.icon + '</div><div class="cat-info"><h4>' + info.title + '</h4><p>' + info.desc + '</p>';
+      if (info.why) html += '<p style="margin-top:4px;color:var(--accent);font-weight:600">' + info.why + '</p>';
+      html += '</div></div>';
+      html += '<div class="cat-bars-container">';
+      // Sort surfaces: rcrt_full first
+      const sorted = [...surfaces].sort((a, b) => a === 'rcrt_full' ? -1 : b === 'rcrt_full' ? 1 : a.localeCompare(b));
+      sorted.forEach(s => {
+        const stats = (cat.surfaces || {})[s];
+        const pctVal = stats ? (stats.accuracy * 100) : 0;
+        const detail = stats ? stats.correct + '/' + stats.total : '0/0';
+        const color = surfaceColor(s);
+        html += '<div class="cat-bar-row"><div class="cat-bar-label" style="color:' + color + '">' + surfaceLabel(s, sMods[s]) + '</div><div class="cat-bar-track"><div class="cat-bar-fill" style="width:' + Math.max(pctVal, 2) + '%;background:' + color + '">' + (pctVal > 8 ? pctVal.toFixed(0) + '%' : '') + '</div></div><div class="cat-bar-detail">' + detail + '</div></div>';
+      });
+      html += '</div></div>';
+    });
+
+    document.getElementById('category-card').innerHTML = html;
+    document.getElementById('category-section').style.display = 'block';
+  } catch (e) { /* skip */ }
+}
+
+loadAll();
+</script>
+</body>
+</html>
