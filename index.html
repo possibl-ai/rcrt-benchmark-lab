@@ -443,81 +443,90 @@ function renderEffectiveCost() {
   const introEl = document.getElementById('effective-cost-intro');
   const tableEl = document.getElementById('effective-cost-table');
 
-  // Collect all surface results across runs
-  const surfaceData = {};
+  // Show per-run comparisons so we only compare surfaces that competed in the same benchmark
+  const runComparisons = [];
   allSummaries.forEach(s => {
-    (s.surface_summaries || []).forEach(sf => {
-      if (sf.tasks === 0) return;
-      const key = sf.surface + '|' + (sf.model || '');
-      if (!surfaceData[key]) surfaceData[key] = { surface: sf.surface, model: sf.model, totalTasks: 0, totalCorrect: 0, totalCost: 0, totalLatency: 0 };
-      surfaceData[key].totalTasks += sf.tasks;
-      surfaceData[key].totalCorrect += sf.correct;
-      surfaceData[key].totalCost += sf.total_cost_usd || 0;
-      surfaceData[key].totalLatency += (sf.avg_latency_ms || 0) * sf.tasks;
-    });
+    const surfs = (s.surface_summaries || []).filter(sf => sf.tasks > 0);
+    const rcrt = surfs.find(x => x.surface === 'rcrt_full');
+    const competitors = surfs.filter(x => !isControl(x.surface));
+    const controls = surfs.filter(x => isControl(x.surface));
+    if (competitors.length < 2) return;
+    const defTitle = (allDefinitions[s.benchmark_id] || {}).title || s.benchmark_id;
+    runComparisons.push({ defTitle, competitors, controls, benchmarkId: s.benchmark_id });
   });
 
-  const rows = Object.values(surfaceData).filter(r => r.totalTasks > 0);
-  if (rows.length === 0) { section.style.display = 'none'; return; }
+  if (runComparisons.length === 0) { section.style.display = 'none'; return; }
 
-  rows.forEach(r => {
-    r.accuracy = r.totalCorrect / r.totalTasks;
-    r.retryMultiplier = r.accuracy > 0 ? 1 / r.accuracy : Infinity;
-    r.avgLatency = r.totalLatency / r.totalTasks;
-    r.effectiveLatency = r.avgLatency * r.retryMultiplier;
-    r.effectiveCostPer = r.totalCost > 0 && r.totalCorrect > 0 ? r.totalCost / r.totalCorrect : 0;
-    r.naiveCostPer = r.totalCost > 0 ? r.totalCost / r.totalTasks : 0;
-  });
-
-  const competitors = rows.filter(r => !isControl(r.surface));
-  const controls = rows.filter(r => isControl(r.surface));
-  competitors.sort((a, b) => a.surface === 'rcrt_full' ? -1 : b.surface === 'rcrt_full' ? 1 : b.accuracy - a.accuracy);
-
-  const rcrt = competitors.find(r => r.surface === 'rcrt_full');
-  const maxMultiplier = Math.max(...competitors.map(r => r.retryMultiplier === Infinity ? 5 : r.retryMultiplier));
-
-  introEl.innerHTML = '<strong>Accuracy directly determines real-world cost.</strong> When a system gives a wrong answer, the user retries, the agent re-runs, or a human has to intervene &mdash; each attempt costs tokens, time, and money. A 50% accurate system effectively costs <strong>2&times;</strong> per usable answer. A 90% accurate system costs only <strong>1.11&times;</strong>. Below we show the <em>effective cost multiplier</em> for each approach: how many attempts (and tokens) you actually burn to get one correct answer.';
+  introEl.innerHTML = '<strong>Accuracy directly determines real-world cost.</strong> When a system gives a wrong answer, the user retries, the agent re-runs, or a human has to intervene &mdash; each attempt costs tokens, time, and money. A 50% accurate system effectively costs <strong>2&times;</strong> per usable answer. A 90% accurate system costs only <strong>1.11&times;</strong>. Each table below compares systems that competed <strong>head-to-head on the same benchmark</strong>, so the comparison is fair.';
   introEl.style.display = 'block';
 
   let html = '';
-  html += '<div class="eff-row eff-header"><div>System</div><div>Retry Overhead</div><div style="text-align:right">Accuracy</div><div style="text-align:right">Multiplier</div><div style="text-align:right">Eff. Latency</div><div style="text-align:right">Tokens Saved</div></div>';
 
-  function renderEffRow(r) {
-    const label = surfaceLabel(r.surface, r.model);
-    const color = surfaceColor(r.surface);
-    const tier = modelTier(r.model);
-    const mult = r.retryMultiplier === Infinity ? '&infin;' : r.retryMultiplier.toFixed(2) + '&times;';
-    const barPct = r.retryMultiplier === Infinity ? 100 : Math.min((r.retryMultiplier / maxMultiplier) * 100, 100);
-    const barColor = r.retryMultiplier <= 1.15 ? 'var(--green)' : r.retryMultiplier <= 2 ? 'var(--yellow)' : 'var(--red)';
-    const effLat = r.effectiveLatency < 100000 ? (r.effectiveLatency / 1000).toFixed(1) + 's' : '&mdash;';
+  runComparisons.forEach(run => {
+    const allRows = run.competitors.map(sf => {
+      const acc = sf.tasks > 0 ? sf.correct / sf.tasks : 0;
+      const mult = acc > 0 ? 1 / acc : Infinity;
+      const effLat = (sf.avg_latency_ms || 0) * mult;
+      return { ...sf, accuracy: acc, retryMultiplier: mult, effectiveLatency: effLat };
+    });
+    allRows.sort((a, b) => a.surface === 'rcrt_full' ? -1 : b.surface === 'rcrt_full' ? 1 : b.accuracy - a.accuracy);
 
-    let tokensSaved = '&mdash;';
-    if (rcrt && r.surface !== 'rcrt_full' && !isControl(r.surface) && rcrt.retryMultiplier < r.retryMultiplier && r.retryMultiplier !== Infinity) {
-      const savings = ((1 - rcrt.retryMultiplier / r.retryMultiplier) * 100).toFixed(0);
-      tokensSaved = savings + '% fewer';
-    } else if (r.surface === 'rcrt_full') {
-      tokensSaved = 'baseline';
+    const rcrt = allRows.find(r => r.surface === 'rcrt_full');
+    const maxMult = Math.max(...allRows.map(r => r.retryMultiplier === Infinity ? 5 : r.retryMultiplier));
+
+    html += '<div style="font-size:13px;font-weight:700;color:var(--text);margin:20px 0 10px">' + run.defTitle + '</div>';
+    html += '<div class="eff-row eff-header"><div>System</div><div>Retry Overhead</div><div style="text-align:right">Accuracy</div><div style="text-align:right">Multiplier</div><div style="text-align:right">Eff. Latency</div><div style="text-align:right">Tokens Saved</div></div>';
+
+    allRows.forEach(r => {
+      const label = surfaceLabel(r.surface, r.model);
+      const color = surfaceColor(r.surface);
+      const tier = modelTier(r.model);
+      const mult = r.retryMultiplier === Infinity ? '&infin;' : r.retryMultiplier.toFixed(2) + '&times;';
+      const barPct = r.retryMultiplier === Infinity ? 100 : Math.min((r.retryMultiplier / maxMult) * 100, 100);
+      const barColor = r.retryMultiplier <= 1.15 ? 'var(--green)' : r.retryMultiplier <= 2 ? 'var(--yellow)' : 'var(--red)';
+      const effLat = r.effectiveLatency < 100000 ? (r.effectiveLatency / 1000).toFixed(1) + 's' : '&mdash;';
+
+      let tokensSaved = '&mdash;';
+      if (rcrt && r.surface !== 'rcrt_full' && rcrt.retryMultiplier < r.retryMultiplier && r.retryMultiplier !== Infinity) {
+        const savings = ((1 - rcrt.retryMultiplier / r.retryMultiplier) * 100).toFixed(0);
+        tokensSaved = savings + '% fewer';
+      } else if (r.surface === 'rcrt_full') {
+        tokensSaved = 'baseline';
+      }
+
+      html += '<div class="eff-row">';
+      html += '<div style="color:' + color + ';font-weight:600">' + label + ' <span class="model-tier ' + tier.tier + '">' + tier.label + '</span></div>';
+      html += '<div><div class="eff-bar-track"><div class="eff-bar-fill" style="width:' + barPct + '%;background:' + barColor + '"></div></div></div>';
+      html += '<div style="text-align:right">' + (r.accuracy * 100).toFixed(1) + '%</div>';
+      html += '<div class="eff-multiplier" style="text-align:right;color:' + barColor + '">' + mult + '</div>';
+      html += '<div style="text-align:right;color:var(--muted)">' + effLat + '</div>';
+      html += '<div class="eff-savings" style="text-align:right">' + tokensSaved + '</div>';
+      html += '</div>';
+    });
+
+    // Controls for this run
+    if (run.controls && run.controls.length > 0) {
+      html += '<div style="margin:8px 0 4px;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Control (no retrieval)</div>';
+      run.controls.forEach(sf => {
+        const acc = sf.tasks > 0 ? sf.correct / sf.tasks : 0;
+        const mult = acc > 0 ? 1 / acc : Infinity;
+        const label = surfaceLabel(sf.surface, sf.model);
+        const color = surfaceColor(sf.surface);
+        const tier = modelTier(sf.model);
+        const multStr = mult === Infinity ? '&infin;' : mult.toFixed(2) + '&times;';
+        html += '<div class="eff-row" style="opacity:0.5">';
+        html += '<div style="color:' + color + ';font-weight:600">' + label + ' <span class="model-tier ' + tier.tier + '">' + tier.label + '</span></div>';
+        html += '<div><div class="eff-bar-track"><div class="eff-bar-fill" style="width:100%;background:var(--red)"></div></div></div>';
+        html += '<div style="text-align:right">' + (acc * 100).toFixed(1) + '%</div>';
+        html += '<div class="eff-multiplier" style="text-align:right;color:var(--red)">' + multStr + '</div>';
+        html += '<div style="text-align:right;color:var(--muted)">&mdash;</div>';
+        html += '<div style="text-align:right;color:var(--muted)">&mdash;</div>';
+        html += '</div>';
+      });
     }
+  });
 
-    html += '<div class="eff-row">';
-    html += '<div style="color:' + color + ';font-weight:600">' + label + ' <span class="model-tier ' + tier.tier + '">' + tier.label + '</span></div>';
-    html += '<div><div class="eff-bar-track"><div class="eff-bar-fill" style="width:' + barPct + '%;background:' + barColor + '"></div></div></div>';
-    html += '<div style="text-align:right">' + (r.accuracy * 100).toFixed(1) + '%</div>';
-    html += '<div class="eff-multiplier" style="text-align:right;color:' + barColor + '">' + mult + '</div>';
-    html += '<div style="text-align:right;color:var(--muted)">' + effLat + '</div>';
-    html += '<div class="eff-savings" style="text-align:right">' + tokensSaved + '</div>';
-    html += '</div>';
-  }
-
-  competitors.forEach(renderEffRow);
-
-  if (controls.length > 0) {
-    html += '<div style="margin:12px 0 8px;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Control Group (model alone, no retrieval)</div>';
-    controls.forEach(renderEffRow);
-  }
-
-  // Add explanatory note
-  html += '<div style="margin-top:12px;font-size:11px;color:var(--muted);line-height:1.6"><strong style="color:var(--text)">How to read this:</strong> A 1.11&times; multiplier means for every 100 questions, you need ~111 attempts to get 100 correct answers. A 2.00&times; means you need ~200 attempts. At 0% accuracy (plain model with no context), every attempt fails &mdash; infinite retries, infinite cost. RCRT\'s high accuracy means fewer wasted tokens, less user frustration, and lower total cost of ownership.</div>';
+  html += '<div style="margin-top:16px;font-size:11px;color:var(--muted);line-height:1.6"><strong style="color:var(--text)">How to read this:</strong> A 1.11&times; multiplier means for every 100 questions, you need ~111 attempts to get 100 correct answers. A 1.87&times; means you need ~187 attempts &mdash; nearly double the tokens for the same outcome. RCRT\'s high accuracy means fewer wasted tokens, less user frustration, and lower total cost of ownership.</div>';
 
   tableEl.innerHTML = html;
   section.style.display = 'block';
